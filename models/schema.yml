@@ -1,0 +1,272 @@
+version: 2
+
+models:
+  - name: stg_accounts
+    description: Cleaned CloudDesk account records.
+    columns:
+      - name: account_id
+        data_tests:
+          # Each account should appear only once.
+          # Duplicates could increase revenue and ticket counts.
+          - unique
+
+          # Every account needs an ID.
+          # Without it, subscriptions and tickets cannot
+          # be linked to the correct account.
+          - not_null
+
+      - name: account_name
+        data_tests:
+          # Every account needs a company name.
+          # Missing names make customer reports hard to read.
+          - not_null
+
+      - name: industry
+        data_tests:
+          # Missing industries should be replaced with Unknown.
+          # Empty values could cause accounts to be missed
+          # in reports grouped by industry.
+          - not_null
+
+  - name: stg_subscriptions
+    description: Cleaned subscriptions with MRR validation.
+    columns:
+      - name: subscription_id
+        data_tests:
+          # Each subscription should appear only once.
+          # Duplicates could cause revenue to be counted twice.
+          - unique
+
+          # Every subscription needs an ID.
+          # Missing IDs make it difficult to track plan changes.
+          - not_null
+
+      - name: account_id
+        data_tests:
+          # Every subscription must belong to an account.
+          # Missing IDs leave revenue without an account.
+          - not_null
+
+          # The account must exist in the accounts model.
+          # Invalid accounts could cause revenue to be
+          # missing from customer reports.
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+
+      - name: subscription_status
+        data_tests:
+          # Every subscription needs a status.
+          # Missing statuses make it unclear whether
+          # revenue should be included in active MRR.
+          - not_null
+
+          # Status should be active or churned.
+          # The raw data contains active and Active.
+          # Incorrect values could cause active revenue
+          # to be missed in financial reports.
+          - accepted_values:
+              arguments:
+                values: ['active', 'churned']
+
+  - name: stg_users
+    description: Cleaned and deduplicated user records.
+    columns:
+      - name: user_id
+        data_tests:
+          # Each user should have a different ID.
+          # Duplicate IDs could increase user counts.
+          - unique
+
+          # Every user needs an ID.
+          # Missing IDs make users difficult to identify.
+          - not_null
+
+      - name: email
+        data_tests:
+          # The raw data contains a duplicate email.
+          # Duplicate emails could cause the same person
+          # to be counted more than once.
+          - unique
+
+          # Every user should have an email address.
+          # Missing emails make it difficult to identify
+          # users and check for duplicate records.
+          - not_null
+
+      - name: account_id
+        data_tests:
+          # Each non-empty account ID must exist.
+          # Invalid IDs could cause users to be missed
+          # in account-level user reports.
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+
+  - name: stg_tickets
+    description: Cleaned support ticket records.
+    columns:
+      - name: ticket_id
+        data_tests:
+          # Each support ticket should appear only once.
+          # Duplicate tickets would increase ticket counts.
+          - unique
+
+          # Every ticket needs an ID.
+          # Missing IDs make support cases hard to track.
+          - not_null
+
+      - name: account_id
+        data_tests:
+          # Each non-empty account ID must exist.
+          # Invalid IDs could cause tickets to be missing
+          # from customer support reports.
+          - relationships:
+              arguments:
+                to: ref('stg_accounts')
+                field: account_id
+
+      - name: opened_at
+        data_tests:
+          # Every ticket needs an opening time.
+          # Without it, we cannot calculate resolution time
+          # or report ticket counts by opening date.
+          - not_null
+
+  - name: int_tickets_enriched
+    description: Tickets joined with account details.
+    columns:
+      - name: ticket_id
+        data_tests:
+          # Joining tickets with accounts should not
+          # create duplicate tickets.
+          # Duplicates would increase support metrics.
+          - unique
+
+          # Ticket IDs must remain available after the join.
+          # Missing IDs would make the fact table unreliable.
+          - not_null
+
+  - name: int_account_summary
+    description: Account-level business metrics.
+    columns:
+      - name: account_id
+        data_tests:
+          # The summary should have one row per account.
+          # Duplicates could increase total revenue,
+          # user counts and ticket counts.
+          - unique
+
+          # Every summary row needs an account ID.
+          # Missing IDs make it impossible to link
+          # account metrics to the correct customer.
+          - not_null
+
+  - name: fct_tickets
+    description: Fact table with one row per support ticket.
+    columns:
+      - name: ticket_id
+        data_tests:
+          # The fact table must have one row per ticket.
+          # Duplicates would show incorrect ticket volumes
+          # and could change average resolution times.
+          - unique
+
+          # Every fact row needs a ticket ID.
+          # Missing IDs make individual tickets hard to track.
+          - not_null
+
+      - name: account_id
+        data_tests:
+          # Every ticket needs an account ID.
+          # Missing IDs prevent customer-level analysis.
+          - not_null
+
+          # Each ticket must link to a valid account.
+          # Otherwise, tickets could disappear when
+          # the fact and account tables are joined.
+          - relationships:
+              arguments:
+                to: ref('dim_account')
+                field: account_id
+
+      - name: date_key
+        data_tests:
+          # Every ticket needs an opening date.
+          # Missing dates would affect daily and
+          # monthly support reports.
+          - not_null
+
+          # Every ticket date must exist in dim_date.
+          # Invalid dates could cause tickets to be
+          # missing from time-based reports.
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+
+      - name: ticket_count
+        data_tests:
+          # Every ticket should contribute to ticket counts.
+          # Missing values could reduce reported totals.
+          - not_null
+
+  - name: dim_account
+    description: Account dimension.
+    columns:
+      - name: account_id
+        data_tests:
+          # Each account should appear only once.
+          # Duplicate accounts could create extra rows
+          # when joined with the ticket fact table.
+          - unique
+
+          # Every account needs an ID.
+          # Missing IDs prevent tickets from being
+          # linked to account information.
+          - not_null
+
+  - name: dim_date
+    description: Ticket opening date dimension.
+    columns:
+      - name: date_key
+        data_tests:
+          # Each date should appear only once.
+          # Duplicate dates could increase ticket counts
+          # when joined with the fact table.
+          - unique
+
+          # Every date record needs a date key.
+          # Missing keys would affect time-based reports.
+          - not_null
+
+snapshots:
+  - name: subscriptions_snapshot
+    description: SCD Type 2 subscription history.
+    columns:
+      - name: dbt_scd_id
+        data_tests:
+          # Each historical version needs a unique ID.
+          # Duplicate IDs make subscription history unreliable.
+          - unique
+
+          # Every historical version needs an ID.
+          # Missing IDs make old and new versions
+          # difficult to identify.
+          - not_null
+
+      - name: subscription_id
+        data_tests:
+          # Every historical record needs a subscription ID.
+          # Without it, we cannot connect old and new plans
+          # to the same subscription.
+          - not_null
+
+      - name: dbt_valid_from
+        data_tests:
+          # Every historical version needs a start time.
+          # Missing times make it impossible to know
+          # when a subscription change became valid.
+          - not_null

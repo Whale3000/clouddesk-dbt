@@ -1,0 +1,8 @@
+clouddesk_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: clouddesk.duckdb
+      schema: main
+      threads: 4
